@@ -1,0 +1,486 @@
+﻿Program.Sub.Preflight.Start
+v.Global.sLinePart.Declare
+v.Global.sDesc.Declare
+v.Global.sRouter.Declare
+v.Global.SBom.Declare
+v.Global.bFromShipDash.Declare(Boolean, False)
+v.Global.sSO.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+Function.Intrinsic.UI.UsePixels ' Allows you to use Pixels instead of Twips throughout
+'SO Linee Populate
+	'Change For Shipping Dash form ifs to case
+	
+	f.Intrinsic.Control.SelectCase(v.Caller.Hook)	
+		'Change Script 1 Name 12410
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "12010")
+		f.Intrinsic.Control.Case("12010")
+			v.Passed.000162.Set("Ship Kit")
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf
+		
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "12440")
+		f.Intrinsic.Control.Case("12440")
+			v.Passed.000162.Set("Ship Kit")
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf
+	'Script 1
+		'Launch sub
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "12620")
+		f.Intrinsic.Control.Case("12620")
+			f.Intrinsic.Control.CallSub("GetComponents")
+			'v.Global.sSO.Set(v.Caller.Switches.Trim)
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf
+		
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "12410")
+		f.Intrinsic.Control.Case("12410")
+			f.Intrinsic.Control.CallSub("GetComponents")
+			'v.Global.sSO.Set(v.Caller.Switches.Trim)
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf	
+	'Rebuilding routers from BOM screen.  Hook 27000
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "27000")
+		f.Intrinsic.Control.Case("27000")
+			v.Global.SBom.Set("")
+			v.Global.sRouter.Set("")
+			f.Intrinsic.Control.CallSub("OmmitLogic")
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf
+	'BOMs created from BOM Compare originally – Hook 50312
+		'f.Intrinsic.Control.If(v.Caller.Hook, =, "50312")
+		f.Intrinsic.Control.Case("50312")
+			v.Global.SBom.Set("")
+			v.Global.sRouter.Set("")
+			f.Intrinsic.Control.CallSub("OmmitLogic")
+			f.Intrinsic.Control.End
+		'f.Intrinsic.Control.EndIf	
+	f.Intrinsic.Control.CaseElse
+		'Launch from Shipping Dash
+		'Check Switch
+		f.Intrinsic.Control.If(v.Caller.Switches.Trim, <>, "")
+			v.Global.sSO.Set(v.Caller.Switches.Trim)
+			v.Global.bFromShipDash.Set(True)
+			f.Intrinsic.Control.CallSub("GetComponents")
+			f.Intrinsic.Control.End
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.EndSelect
+Program.Sub.Main.End
+
+Program.Sub.ErrorMsg.Start
+v.Local.sError.Declare
+
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_6940_Gen_Bom.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.GetComponents.Start
+v.Local.sSQL.Declare
+v.Local.iCnt.Declare
+v.Local.sRet.Declare(StringList)
+v.Local.sSO.Declare
+v.Local.fQty.Declare
+v.Local.sPart.Declare
+v.Local.sParent.Declare
+v.Local.sRev.Declare
+V.Local.sLocation.Declare
+v.Local.sDelimString.Declare
+v.Local.sStatus.Declare
+v.Local.sTemp.Declare
+
+v.Local.iCnt2.Declare
+v.Local.sFilter.Declare
+v.Local.iLine.Declare
+v.Local.sRecord.Declare
+
+v.Local.sQuantity.Declare
+
+v.Local.iCon.Declare
+v.Local.sPL.Declare
+v.Local.sInv_Um.Declare
+v.Local.iStatus.Declare
+v.Local.iBom.Declare(Long, 1)
+v.Local.sDesc.Declare
+v.Local.sCust.Declare
+v.Local.sTax.Declare
+f.Intrinsic.Control.Try
+'Try something
+	'Bom
+	f.Data.DataTable.Create("bomDT", True)
+	f.Data.DataTable.AddColumn("bomDT", "Parent", "String")
+	f.Data.DataTable.AddColumn("bomDT", "Part", "string")
+	f.Data.DataTable.AddColumn("bomDT", "Qty", "Float")
+	f.Data.DataTable.AddColumn("bomDT", "Line", "String")
+	f.Data.DataTable.AddColumn("bomDT", "Description", "String")
+	f.Data.DataTable.AddColumn("bomDT", "Source", "String")
+	f.Data.DataTable.AddColumn("bomDT", "Sort", "String")
+	f.Data.DataTable.AddColumn("bomDT", "InventoryCost", "String")
+	f.Data.DataTable.AddColumn("bomDT", "invUM", "String")
+
+	'Get all the Parts in the SO.
+	'Change to account for Dash
+	f.Intrinsic.Control.If(v.Global.bFromShipDash)
+		v.Local.sSO.Set(v.Global.sSO)
+	f.Intrinsic.Control.Else
+		v.Local.sSO.Set(v.Passed.000060)
+	f.Intrinsic.Control.EndIf
+	f.Intrinsic.String.LPad(v.Local.sSO, "0", 7, v.Local.sSO)
+	f.ODBC.Connection!con.OpenCompanyConnection
+		f.Intrinsic.String.Build("Select Part, Record_no, Qty_Ordered from V_ORDER_LINES where Order_no = '{0}' and line_type = 'S' order by Record_no  asc", v.Local.sSO, v.Local.sSQL)
+		f.Data.DataTable.CreateFromSQL("dtParts", "con", v.Local.sSQL, true)
+'		f.Intrinsic.String.Build("Select Tax_State from V_Customer_Tax where Cust = '{0}'", v.Local.sCust, v.Local.sSQL)
+'		f.ODBC.Connection!con.ExecuteAndReturn(v.Local.sSQL, v.Local.sTax)
+	f.ODBC.Connection!con.Close
+	'Check if HW parts already exists
+
+	f.Data.DataView.Create("dtParts", "dvHW", 22, "Part like 'HW%'", "")
+	f.Intrinsic.Control.If(v.DataView.dtParts!dvHW.RowCount, >, 0)
+		f.Intrinsic.UI.Msgbox("This Order already contains a HW Part.")
+		f.Intrinsic.Control.End
+	f.Intrinsic.Control.EndIf
+	
+	f.Intrinsic.String.Left(v.DataTable.dtParts(v.DataTable.dtParts.RowCount--).Record_no!fieldValTrim, 3, v.Local.sRecord)
+	v.Local.iLine.Set(v.Local.sRecord.Float)
+	f.Intrinsic.Math.Add(v.Local.iLine, 1, v.Local.iLine)
+	f.Intrinsic.String.LPad(v.Local.iLine, "0", 3, v.Local.sRecord)
+	f.Intrinsic.String.RPad(v.Local.sRecord, "0", 4, v.Local.sRecord)
+	'Create Parent Part
+	f.Intrinsic.String.Build("HW{0}{1}", v.Local.sSO, v.Local.sRecord, v.Global.sLinePart)
+	f.Intrinsic.String.RPad(v.Global.sLinePart, " ", 20, v.Global.sLinePart)
+	'Get Desc
+	f.Intrinsic.String.Build("Hardware Kit - {0}", v.Local.sSO, v.Global.sDesc)
+	f.Intrinsic.UI.InvokeWaitDialog("Creating Hardware Part...")
+	'Loop trhough each BOM in the SO
+	f.Intrinsic.Control.For(v.Local.iCnt, 0, v.DataTable.dtParts.RowCount--, 1)
+		'Get Parent
+		v.Local.sParent.Set(v.DataTable.dtParts(v.Local.iCnt).Part!FieldVal)
+		F.Intrinsic.String.RPad(V.Local.sParent," ",20,V.Local.sParent)
+        F.Intrinsic.String.Right(V.Local.sParent,3,V.Local.sRev)
+        F.Intrinsic.String.Left(V.Local.sParent,17,V.Local.sParent)
+        v.Local.sQuantity.Set(v.DataTable.dtParts(v.Local.iCnt).Qty_Ordered!FieldVal)
+		'Cost Build up
+		F.Global.Callwrapper.New("GetBomInfo","Manufacturing.BOM.GetInventoryStatus")
+	    F.Global.Callwrapper.SetProperty("GetBomInfo","ParentNumber",V.Local.sParent.Trim)
+	    F.Global.Callwrapper.SetProperty("GetBomInfo","ParentNumberRevision",V.Local.sRev.Trim)
+	    F.Global.Callwrapper.SetProperty("GetBomInfo","Quantity", v.Local.sQuantity)
+	    F.Global.Callwrapper.SetProperty("GetBomInfo","LocationCodes", V.Local.sLocation.Trim)
+		
+		F.Global.CallWrapper.Run("GetBomInfo")
+		 f.Global.Callwrapper.GetProperty("GetBomInfo","Status",v.Local.sStatus)
+		
+		f.Global.Callwrapper.GetProperty("GetBomInfo","BomData",v.Local.sRet)
+		
+		f.Intrinsic.Control.If(v.Local.sStatus,=,"BomNotFound")
+'			F.Intrinsic.String.Build("Bom Not Found for WO: {0}",V.Local.sParent,V.Local.sTemp)
+'			F.Intrinsic.UI.Msgbox(V.Local.sTemp,"Attention")        
+'        	F.Intrinsic.Control.ExitSub    
+    	f.Intrinsic.Control.Else
+    		'Get Data into a String
+        	f.Intrinsic.String.StringListToString(v.local.sRet,v.local.sDelimString)
+        	'Get Data into Table
+        	f.Data.DataTable.CreateFromString("tmpBom",v.Local.sDelimString,"Level*!*LongPart*!*Description*!*Category*!*Source*!*Qty*!*InventoryOH*!*InventoryOO*!*InventoryRequired*!*InventoryNet*!*BOMNet*!*Parents*!*LeadTime*!*LeadDate*!*Part*!*Sort*!*InventoryCost*!*BOMSetupQty*!*NonInv","Long*!*String*!*String*!*String*!*String*!*Float*!*Float*!*Float*!*Float*!*Float*!*Float*!*String*!*Long*!*String*!*String*!*String*!*Float*!*Float*!*String",v.Ambient.Tab,"*!*",true)
+			'Get DV and To distinct
+			f.Data.DataView.Create("tmpBom", "tmpBomDV", 22, "Category = 'Exclude'", "")
+			'Get the Exclude Part from SO.
+			f.Data.DataView.ToDataTableDistinct("tmpBom", "tmpBomDV", "tempDT", "LongPart*!*Description*!*Category*!*Source*!*Part*!*Sort*!*InventoryCost")
+			f.Data.DataTable.AddColumn("tempDT", "Qty", "Float")
+			f.Data.DataTable.AddColumn("tempDT", "Line", "String", v.DataTable.dtParts(v.Local.iCnt).Record_no!FieldValTrim)
+			'Format
+			f.Data.DataTable.SetValueFormat("tempDT", -1, "Source", "Source", "&&")
+			'Loop Through TempDT
+			f.Intrinsic.Control.For(v.Local.iCnt2, 0, v.DataTable.tempDT.RowCount--, 1)	
+				'Create Filter for sum and set qty
+				f.Intrinsic.String.Build("Part = '{0}' and Category = 'Exclude'", v.DataTable.tempDT(v.Local.iCnt2).Part!FieldVal, v.Local.sFilter)
+				f.Data.DataTable.Compute("tmpBom", "sum(Qty)", v.Local.sFilter, v.Local.fQty)
+				f.Data.DataTable.SetValue("tempDT", v.Local.iCnt2, "Qty", v.Local.fQty)
+			f.Intrinsic.Control.Next(v.Local.iCnt2)
+			'Merge
+			f.Data.DataTable.Merge("tempDT", "bomDT", false, 2)
+			'Close
+			f.Data.DataTable.Close("tempDT")
+			f.Data.DataTable.Close("tmpBom")
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Next(v.Local.iCnt)
+	'Get Dictionaries
+	f.ODBC.Connection!con.OpenCompanyConnection
+		f.Data.Dictionary.CreateFromSQL("uomDict", "con", "Select Part, UM_Inventory from V_Inventory_All")
+		f.Data.Dictionary.SetDefaultReturn("uomDict", "")
+		
+		f.Data.Dictionary.Create("sourceDict")
+		f.Data.Dictionary.AddItem("sourceDict", "PS      ", "P")
+		f.Data.Dictionary.AddItem("sourceDict", "PJ      ", "J")
+		f.Data.Dictionary.AddItem("sourceDict", "MS      ", "M")
+		f.Data.Dictionary.AddItem("sourceDict", "MF      ", "F")
+		f.Data.Dictionary.SetDefaultReturn("sourceDict", "P")
+	f.ODBC.Connection!con.Close
+	'Fill Data
+	f.Data.DataTable.FillFromDictionary("bomDT", "uomDict", "Part", "invUM")
+	f.Data.DataTable.FillFromDictionary("bomDT", "sourceDict", "Source", "Source")
+	'Create BOM Part Number.
+	'Create Part
+	f.Global.Object.CreateDB("DB",v.Local.iCon)
+	f.Global.Object.Create("NewPart","Inventory.Part","DB",v.Local.iCon)
+	Function.Global.Object.SetValue("NewPart","PartNumber", v.Global.sLinePart)
+	Function.Global.Object.SetValue("NewPart","LocationCode","  ")
+	Function.Global.Object.SetValue("NewPart","Description.Primary", v.Global.sDesc)	
+	Function.Global.Object.SetValue("NewPart","Information.ProductLine.ProductLineCode", "50")
+	Function.Global.Object.SetValue("NewPart","Information.UnitOfMeasure.UnitOfMeasureCode", "EA")
+	'Function.Global.Object.SetValue("NewPart","Sales.BomType", v.Local.iBom)
+	Function.Global.Object.Insert("NewPart",v.Local.iStatus)
+	Function.Global.Object.Dispose("NewPart")
+	
+	'Call Uploader Bom Sub
+	f.Intrinsic.Control.CallSub("uploadSeqBom")
+	
+	f.ODBC.Connection!con.OpenCompanyConnection
+	 	f.Intrinsic.String.Build("Update INVENTORY_MST3 Set model_bom_flag = 'B' Where Part = '{0}'", v.Global.sLinePart, v.Local.sSQL)
+	 	f.ODBC.Connection!con.Execute(v.Local.sSQL)
+	 	f.Intrinsic.String.Build("Update INVENTORY_MST2 Set Code_Source = 'F' Where Part = '{0}'", v.Global.sLinePart, v.Local.sSQL)
+	 	f.ODBC.Connection!con.Execute(v.Local.sSQL)
+	 	f.Intrinsic.String.Build("Update INVENTORY_MSTR Set Code_bom = 'B' Where Part = '{0}'", v.Global.sLinePart, v.Local.sSQL)
+	 	f.ODBC.Connection!con.Execute(v.Local.sSQL)
+	f.ODBC.Connection!con.Close
+	'Build Router.
+	
+	'Set Bom to the SO LINEpush
+	f.Intrinsic.Control.If(v.Global.bFromShipDash.Not)
+'		v.Passed.000071.Set(v.Global.sLinePart)
+'		v.Passed.000003.Set(v.Global.sDesc)
+'		v.Passed.000001.Set(1)
+		v.Passed.000052.Set(v.Global.sLinePart)
+		v.Passed.000056.Set(v.Global.sDesc)
+		v.Passed.000007.Set(1)
+	f.Intrinsic.Control.EndIf
+	
+	f.Intrinsic.UI.CloseWaitDialog
+	f.Intrinsic.Control.If(v.Local.sTax.Trim, <>, "")
+		'Set Tax Flag
+	f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Catch
+	f.Intrinsic.UI.CloseWaitDialog
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.GetComponents.End
+
+'Bom Uploader Template, change data from incoming code.
+Program.Sub.uploadSeqBom.Start
+v.Local.sParentName.Declare
+v.Local.sParentRev.Declare
+v.Local.sComponentPartNumber.Declare
+v.Local.sQty.Declare
+v.Local.sSource.Declare
+v.Local.sBlankSpaces.Declare
+v.Local.sPartClass.Declare
+v.Local.sPartType.Declare
+v.Local.sUM.Declare
+v.Local.sWC.Declare
+v.Local.sCategory.Declare
+v.Local.sDesc.Declare
+
+v.Local.sSQL.Declare
+v.Local.iCnt.Declare
+v.Local.iCnt2.Declare
+v.Local.sLine.Declare
+v.Local.sText.Declare
+v.Local.sFilePath.Declare
+v.Local.sSeq.Declare
+f.Intrinsic.Control.Try
+
+	'Get Parent Name And Format.
+	v.Local.sParentName.Set(v.Global.sLinePart)
+	f.Intrinsic.String.RPad(v.Local.sParentName, " ", 20, v.Local.sParentName)
+'	v.Local.sParentRev.Set("")
+'	f.Intrinsic.String.RPad(v.Local.sParentName.Trim, " ", 17, v.Local.sParentName)
+'	f.Intrinsic.String.RPad(v.Local.sParentRev.Trim, " ", 3, v.Local.sParentRev)
+'	
+'	f.Intrinsic.String.Build("{0}{1}", v.Local.sParentName, v.Local.sParentRev, v.Local.sParentName)
+	'Write a line for each row.
+	
+	v.Local.sQty.Set("1")		
+	f.Intrinsic.String.Build("{0}.0000", v.Local.sQty, v.Local.sQty(0))
+	f.Intrinsic.String.LPad(v.Local.sQty(0), " ", 16, v.Local.sQty(0))
+	
+	'Get UM
+		v.Local.sUM.Set(v.DataTable.bomDT(v.Local.iCnt).invUM!FieldValTrim)
+		f.Intrinsic.String.Replace(v.Local.sUM, " ", "", v.Local.sUM)
+		f.Intrinsic.String.Left(v.Local.sUM, 2, v.Local.sUM)
+		f.Intrinsic.String.RPad(v.Local.sUM, " ", 2, v.Local.sUM)
+		'Get UM
+		v.Local.sDesc.Set(v.Global.sDesc)
+		'f.Intrinsic.String.Replace(v.Local.sDesc, " ", "", v.Local.sDesc)
+		f.Intrinsic.String.Left(v.Local.sDesc, 30, v.Local.sDesc)
+		f.Intrinsic.String.RPad(v.Local.sDesc, " ", 30, v.Local.sDesc)
+		
+		'Read From Excel.
+		'Get Source. partSource
+		'v.Local.sSource.Set("M")
+'		v.Local.sSource.Set(v.DataTable.libBomCompleteDT(0).partSource!FieldValTrim)
+'		f.Intrinsic.String.Left(v.Local.sSource.Trim, 1, v.Local.sSource)
+'		f.Intrinsic.Control.If(v.Local.sSource.Trim, =, "")
+'			v.Local.sSource.Set("F")
+'		f.Intrinsic.Control.EndIf
+		v.Local.sSource.Set("F")
+		v.Local.sWC.Set("")
+		f.Intrinsic.String.Left(v.Local.sWC.Trim, 6, v.Local.sWC)
+		f.Intrinsic.String.RPad(v.Local.sWC, " ", 6, v.Local.sWC)
+		
+		f.Intrinsic.String.Left(v.Local.sCategory.Trim, 1, v.Local.sCategory)
+		f.Intrinsic.String.RPad(v.Local.sCategory, " ", 1, v.Local.sCategory)
+	
+	v.Local.sLine.Set(v.Local.sParentName)
+	v.Local.sSeq.Set("0000")
+	'Sequence 21-24/4
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sSeq, v.Local.sLine)
+	'Quantity 25-40/16
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sQty, v.Local.sLine)
+	'Component Part Number 41-60/20
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sParentName, v.Local.sLine)
+	'Unit of Measure 61-62/2
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sUM, v.Local.sLine)
+	'Description 63-92/30
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sDesc, v.Local.sLine)
+	'Format Blank
+	f.Intrinsic.String.RPad(v.Local.sBlankSpaces.Trim, " ", 107, v.Local.sBlankSpaces)
+	'Blank Space 93-199/107
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sBlankSpaces, v.Local.sLine)
+	'Workcenter (Tag) 200-205/6
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sWC, v.Local.sLine)
+	'Category 206-206/1
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sCategory, v.Local.sLine)
+	'Source 207-207/1
+	f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sSource, v.Local.sLine)
+	'Add Lines to Text.
+	f.Intrinsic.Control.If(v.Local.sText.Trim, =, "")
+		v.Local.sText.Set(v.Local.sLine)
+	f.Intrinsic.Control.Else
+		f.Intrinsic.String.Build("{0}{1}{2}", v.Local.sText, v.Ambient.NewLine, v.Local.sLine, v.Local.sText)
+	f.Intrinsic.Control.EndIf
+
+	f.Intrinsic.Control.For(v.Local.iCnt, 0, v.DataTable.bomDT.RowCount--, 1)
+		f.Intrinsic.Math.Add(v.Local.iCnt, 1, v.Local.iCnt2)
+		f.Intrinsic.String.LPad(v.Local.iCnt2, "0", 4, v.Local.sSeq)
+		'Get Internal Part and Format it.
+		v.Local.sComponentPartNumber.Set(v.DataTable.bomDT(v.Local.iCnt).Part!FieldValTrim)
+'		v.Local.sComponentPartNumber.Set(v.DataTable.bomDT(v.Local.iCnt).gssPartNo!FieldValTrim)
+'		f.Intrinsic.String.RPad(v.Local.sComponentPartNumber, " ", 17, v.Local.sComponentPartNumber)
+'		f.Intrinsic.String.Build("{0}{1}", v.Local.sComponentPartNumber, v.DataTable.bomDT(v.Local.iCnt).gssRev!FieldValTrim, v.Local.sComponentPartNumber)
+		f.Intrinsic.String.RPad(v.Local.sComponentPartNumber, " ", 20, v.Local.sComponentPartNumber)
+
+		'Get Quantity and Format.		
+		v.Local.sQty.Set(v.DataTable.bomDT(v.Local.iCnt).qty!FieldVal)
+		f.Intrinsic.String.Split(v.Local.sQty, ".", v.Local.sQty)
+		f.Intrinsic.Control.If(v.Local.sQty.UBound, =, 1)
+			f.Intrinsic.String.LPad(v.Local.sQty(0).Trim, "0", 4, v.Local.sQty(0))
+			f.Intrinsic.String.RPad(v.Local.sQty(1).Trim, "0", 4, v.Local.sQty(1))
+			f.Intrinsic.String.Build("{0}.{1}", v.Local.sQty(0), v.Local.sQty(1), v.Local.sQty(0))
+			f.Intrinsic.String.LPad(v.Local.sQty(0), " ", 16, v.Local.sQty(0))
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}.0000", v.Local.sQty(0), v.Local.sQty(0))
+			f.Intrinsic.String.LPad(v.Local.sQty(0), " ", 16, v.Local.sQty(0))
+		f.Intrinsic.Control.EndIf
+		
+		'Get UM
+		v.Local.sUM.Set(v.DataTable.bomDT(v.Local.iCnt).invUM!FieldValTrim)
+		'v.Local.sUM.Set("EA")
+		f.Intrinsic.String.Replace(v.Local.sUM, " ", "", v.Local.sUM)
+		f.Intrinsic.String.Left(v.Local.sUM, 2, v.Local.sUM)
+		f.Intrinsic.String.RPad(v.Local.sUM, " ", 2, v.Local.sUM)
+		'Get UM
+		v.Local.sDesc.Set(v.DataTable.bomDT(v.Local.iCnt).description!FieldValTrim)
+		'v.Local.sDesc.Set("")
+		'f.Intrinsic.String.Replace(v.Local.sDesc, " ", "", v.Local.sDesc) ITEMNO
+		f.Intrinsic.String.Left(v.Local.sDesc, 30, v.Local.sDesc)
+		f.Intrinsic.String.RPad(v.Local.sDesc, " ", 30, v.Local.sDesc)
+		
+		
+		'Get Source.
+		v.Local.sSource.Set(v.DataTable.bomDT(v.Local.iCnt).Source!FieldValTrim)
+		f.Intrinsic.String.Left(v.Local.sSource.Trim, 1, v.Local.sSource)
+		f.Intrinsic.Control.If(v.Local.sSource.Trim, =, "")
+			v.Local.sSource.Set("P")
+		f.Intrinsic.Control.EndIf
+		'f.Intrinsic.String.RPad(v.Local.sSource.Trim, "J", 1, v.Local.sSource)
+'		v.Local.sPartClass.Set(v.DataTable.bomDT(v.Local.iCnt).partClass!FieldValTrim)
+'		v.Local.sPartType.Set(v.DataTable.bomDT(v.Local.iCnt).partType!FieldValTrim)
+'		f.Intrinsic.String.Build("Select MRC from GCG_5787_CLASS_TYPE where Class_ID = '{0}' and Type_ID = '{1}'", v.Local.sPartClass.Trim, v.Local.sPartType.Trim, v.Local.sSQL)
+'		f.ODBC.Connection!con.OpenCompanyConnection
+'		 	f.ODBC.Connection!con.ExecuteAndReturn(v.Local.sSQL, v.Local.sSource)
+'		f.ODBC.Connection!con.Close
+'		f.Intrinsic.Control.If(v.Local.sSource.Trim, =, "")
+'			v.Local.sSource.Set("J")
+'		f.Intrinsic.Control.EndIf
+'		f.Intrinsic.String.Left(v.Local.sSource, 1, v.Local.sSource)
+		'Get Workcenter (Tag)
+		v.Local.sWC.Set(v.DataTable.bomDT(v.Local.iCnt).Line!FieldValTrim)
+		f.Intrinsic.String.Left(v.Local.sWC.Trim, 6, v.Local.sWC)
+		f.Intrinsic.String.RPad(v.Local.sWC, " ", 6, v.Local.sWC)
+		'Get Category 
+		'v.Local.sCategory.Set(v.DataTable.bomDT(v.Local.iCnt).Category!FieldValTrim)
+		v.Local.sCategory.Set("")
+		f.Intrinsic.String.Left(v.Local.sCategory.Trim, 1, v.Local.sCategory)
+		f.Intrinsic.String.RPad(v.Local.sCategory, " ", 1, v.Local.sCategory)
+		
+		'Write Line.
+		'Parent Number 1-20/20
+		v.Local.sLine.Set(v.Local.sParentName)
+		'Sequence 21-24/4
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sSeq, v.Local.sLine)
+		'Quantity 25-40/16
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sQty, v.Local.sLine)
+		'Component Part Number 41-60/20
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sComponentPartNumber, v.Local.sLine)
+		'Unit of Measure 61-62/2
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sUM, v.Local.sLine)
+		'Description 63-92/30
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sDesc, v.Local.sLine)
+		'Format Blank
+		'Memo1
+		v.Local.sBlankSpaces.Set(" ")
+		f.Intrinsic.String.RPad(v.Local.sBlankSpaces.Trim, " ", 87, v.Local.sBlankSpaces)
+		'Blank Space 93-199/107
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sBlankSpaces, v.Local.sLine)
+		
+		'v.Local.sBlankSpaces.Set(v.DataTable.bomDT(v.Local.iCnt).itemNo!FieldValTrim)
+		f.Intrinsic.String.RPad(v.Local.sBlankSpaces.Trim, " ", 20, v.Local.sBlankSpaces)
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sBlankSpaces, v.Local.sLine)
+		'Workcenter (Tag) 200-205/6
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sWC, v.Local.sLine)
+		'Category 206-206/1
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sCategory, v.Local.sLine)
+		'Source 207-207/1
+		f.Intrinsic.String.Build("{0}{1}", v.Local.sLine, v.Local.sSource, v.Local.sLine)
+		'Add Lines to Text.
+		f.Intrinsic.Control.If(v.Local.sText.Trim, =, "")
+			v.Local.sText.Set(v.Local.sLine)
+		f.Intrinsic.Control.Else
+			f.Intrinsic.String.Build("{0}{1}{2}", v.Local.sText, v.Ambient.NewLine, v.Local.sLine, v.Local.sText)
+		f.Intrinsic.Control.EndIf
+	f.Intrinsic.Control.Next(v.Local.iCnt)
+	'Get File Path 
+	f.Intrinsic.String.Build("{0}\BOMHDR.TXT", v.Caller.FilesDir, v.Local.sFilePath)
+	f.Intrinsic.File.String2File(v.Local.sFilePath, v.Local.sText)
+	'Call 1Shot Program
+	f.Global.General.CallWrapperSync(50, "UPLBOMH/X")
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.uploadSeqBom.End
+
+Program.Sub.OmmitLogic.Start
+v.Local.sSQL.Declare
+f.Intrinsic.Control.Try
+	f.ODBC.Connection!con.OpenCompanyConnection
+		f.Intrinsic.String.Build("Update ROUTER_LINE Set OMIT_FROM_WO = '1' Where Router = '{1}' and Part_WC_OUTSIDE in (Select Part from V_BOM_MSTR where Parent = '{0}' and Category = 'X')", v.Global.SBom, v.Global.sRouter, v.Local.sSQL)
+		f.ODBC.Connection!con.Execute(v.Local.sSQL)
+	f.ODBC.Connection!con.Close
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, v.Ambient.CurrentSubroutine)
+f.Intrinsic.Control.EndTry
+Program.Sub.OmmitLogic.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8523.27591$}$1
+${$6$}$aanazco$}$20230727110349889$}$7aQAV3Tor/tR9bkuakHbuzQlHVuXCGOz7gYQ/r09QzAry1OcWwe1jv8LM3lOEjWByW5QyJNWZBk=
+Program.Sub.Comments.End
